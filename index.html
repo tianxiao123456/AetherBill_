@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f3f1eb" />
+    <title>AetherBill 库存记账</title>
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <h1>AetherBill</h1>
+          <span>本地库存 · 进出 · 快递 · 账本</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><b id="kpi-stock">0</b><span>总库存</span></div>
+          <div class="kpi"><b id="kpi-sku">0</b><span>货品</span></div>
+          <div class="kpi"><b id="kpi-balance">¥0.00</b><span>结余</span></div>
+        </div>
+      </header>
+
+      <nav class="nav">
+        <button data-view="stock" class="active">库存</button>
+        <button data-view="flow">进出</button>
+        <button data-view="express">快递</button>
+        <button data-view="ledger">账本</button>
+      </nav>
+
+      <main id="main"></main>
+    </div>
+
+    <nav class="mobile-nav">
+      <button data-view="stock" class="active">库存</button>
+      <button data-view="flow">进出</button>
+      <button data-view="express">快递</button>
+      <button data-view="ledger">账本</button>
+    </nav>
+
+    <div class="toast" id="toast"></div>
+    <dialog id="dlg"></dialog>
+    <script src="js/app.js"></script>
+  </body>
+</html>
