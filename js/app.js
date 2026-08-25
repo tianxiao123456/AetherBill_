@@ -38,7 +38,12 @@ const store = {
     this.save();
   },
 
-  addProduct({ sku, name, qty, unit, cost, note }) {
+  clearAll() {
+    this.data = emptyState();
+    this.save();
+  },
+
+  addProduct({ sku, name, qty, unit, cost, retailPrice, note }) {
     const product = {
       id: uid(),
       sku: (sku || "").trim(),
@@ -46,6 +51,7 @@ const store = {
       qty: Number(qty) || 0,
       unit: (unit || "件").trim(),
       cost: Number(cost) || 0,
+      retailPrice: Number(retailPrice) || 0,
       note: (note || "").trim(),
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -73,6 +79,7 @@ const store = {
     const p = this.data.products.find((x) => x.id === id);
     if (!p) return;
     Object.assign(p, patch, { updatedAt: nowIso() });
+    if (p.retailPrice == null) p.retailPrice = 0;
     this.save();
   },
 
@@ -130,7 +137,7 @@ const store = {
     this.save();
   },
 
-  createOrder({ info, company, tracking, freight, income, note, items }) {
+  createOrder({ info, company, tracking, freight, expectedIncome, income, note, items }) {
     const lines = items
       .map((it) => {
         const p = this.data.products.find((x) => x.id === it.productId);
@@ -156,7 +163,8 @@ const store = {
     const orderId = uid();
     const goodsTotal = lines.reduce((s, it) => s + it.qty * it.price, 0);
     const freightAmt = Number(freight) || 0;
-    const incomeAmt = income === "" || income == null ? goodsTotal : Number(income) || 0;
+    const expectedIncomeAmt = expectedIncome === "" || expectedIncome == null ? goodsTotal : Number(expectedIncome) || 0;
+    const incomeAmt = income === "" || income == null ? expectedIncomeAmt : Number(income) || 0;
     const infoText = (info || "").trim();
 
     for (const line of lines) {
@@ -189,7 +197,11 @@ const store = {
       },
       items: lines,
       goodsTotal,
+      expectedIncome: expectedIncomeAmt,
       income: incomeAmt,
+      actualIncome: incomeAmt,
+      actualIncomeNote: "",
+      actualIncomeAt: createdAt,
       note: (note || "").trim(),
       createdAt,
     };
@@ -241,11 +253,50 @@ const store = {
     this.save();
   },
 
+  removeMove(id) {
+    const move = this.data.moves.find((x) => x.id === id);
+    if (!move) return;
+    this.data.moves = this.data.moves.filter((x) => x.id !== id);
+    this.save();
+    return move;
+  },
+
+  removeOrder(id) {
+    const order = this.data.orders.find((x) => x.id === id);
+    if (!order) return;
+
+    for (const line of order.items) {
+      const p = this.data.products.find((x) => x.id === line.productId);
+      if (p) {
+        p.qty += Number(line.qty) || 0;
+        p.updatedAt = nowIso();
+      }
+    }
+
+    this.data.moves = this.data.moves.filter((m) => m.orderId !== id);
+    this.data.ledger = this.data.ledger.filter((x) => x.orderId !== id);
+    this.data.orders = this.data.orders.filter((x) => x.id !== id);
+    this.save();
+    return order;
+  },
+
   updateOrderExpress(id, patch) {
     const o = this.data.orders.find((x) => x.id === id);
     if (!o) return;
     o.express = { ...o.express, ...patch };
     this.save();
+  },
+
+  updateOrderActualIncome(id, amount, note = "") {
+    const o = this.data.orders.find((x) => x.id === id);
+    if (!o) return;
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n < 0) throw new Error("实际入账金额须为不小于 0 的数字");
+    o.actualIncome = n;
+    o.actualIncomeNote = (note || "").trim();
+    o.actualIncomeAt = nowIso();
+    this.save();
+    return o;
   },
 
   totals() {
@@ -322,6 +373,7 @@ function renderStock() {
             <th>SKU</th>
             <th class="right">库存</th>
             <th class="right">成本</th>
+            <th class="right">零售价</th>
             <th>更新时间</th>
             <th></th>
           </tr>
@@ -331,9 +383,14 @@ function renderStock() {
             .map(
               (p) => `
             <tr>
-              <td data-label="货品">${escapeHtml(p.name)}${p.note ? `<div class="muted">${escapeHtml(p.note)}</div>` : ""}</td>
+              <td data-label="货品">
+                <div class="product-cell">
+                  <div class="product-name">${escapeHtml(p.name)}</div>
+                  ${p.note ? `<div class="product-note">${escapeHtml(p.note)}</div>` : ""}
+                </div>
+              </td>
               <td data-label="SKU" class="muted">${escapeHtml(p.sku || "—")}</td>
-              <td data-label="库存">
+              <td data-label="库存" class="stock-cell">
                 <div class="qty-edit">
                   <button data-act="dec" data-id="${p.id}">−</button>
                   <input class="num" data-qty="${p.id}" value="${p.qty}" inputmode="numeric">
@@ -341,11 +398,12 @@ function renderStock() {
                 </div>
               </td>
               <td data-label="成本" class="num right ${p.qty <= 0 ? "low" : ""}">${money(p.cost)}</td>
+              <td data-label="零售价" class="num right">${money(p.retailPrice ?? 0)}</td>
               <td data-label="更新" class="muted num">${fmtTime(p.updatedAt)}</td>
               <td class="row-actions">
                 <button class="btn ghost" data-act="in" data-id="${p.id}">入库</button>
-                <button class="btn ghost" data-act="edit" data-id="${p.id}">改</button>
-                <button class="btn ghost" data-act="del" data-id="${p.id}">删</button>
+                <button class="btn ghost" data-act="edit" data-id="${p.id}">修改</button>
+                <button class="btn ghost" data-act="del" data-id="${p.id}">删除</button>
               </td>
             </tr>`
             )
@@ -359,10 +417,14 @@ function renderFlow() {
   const opts = store.data.products
     .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}（${p.qty}${p.unit}）</option>`)
     .join("");
+  const companyOptions = ["顺丰", "中通", "极兔", "申通", "京东"]
+    .map((company) => `<option value="${company}">${company}</option>`)
+    .join("");
   return `
     <form id="order-form" class="panel">
       <div class="form-grid">
         <label class="full"><span class="label">出库明细</span>
+          <div class="calc-hint">单价 × 数量 = 原应收款</div>
           <div class="line-items" id="lines">
             <div class="line">
               <select class="field" name="productId">${opts || `<option value="">暂无货品</option>`}</select>
@@ -371,22 +433,21 @@ function renderFlow() {
               <button type="button" class="btn ghost" data-act="rm-line">×</button>
             </div>
           </div>
-          <button type="button" class="btn" id="add-line" style="margin-top:8px">加一行</button>
+          <button type="button" class="btn" id="add-line" style="margin-top:8px">添加产品</button>
         </label>
         <label class="full"><span class="label">快递信息</span><textarea class="field" name="info" placeholder="客户 / 电话 / 地址"></textarea></label>
-        <label><span class="label">快递公司</span><input class="field" name="company" placeholder="如 顺丰 / 中通"></label>
+        <label><span class="label">快递公司</span><select class="field" name="company"><option value="">请选择</option>${companyOptions}</select></label>
         <label><span class="label">运单号</span><input class="field" name="tracking"></label>
         <label><span class="label">运费</span><input class="field" name="freight" inputmode="decimal" placeholder="0"></label>
+        <label><span class="label">原应收款</span><input class="field" name="expectedIncome" inputmode="decimal" placeholder="自动计算：数量 × 单价"></label>
         <label><span class="label">实收货款</span><input class="field" name="income" inputmode="decimal" placeholder="默认=数量×单价"></label>
         <label class="full"><span class="label">备注</span><textarea class="field" name="note"></textarea></label>
       </div>
       <div class="summary">
-        <span class="muted">确认后扣库存，记录写入下方表格</span>
+        <span class="muted">确认后扣库存，记录写入进出记录页</span>
         <button class="btn primary" type="submit">确认出单</button>
       </div>
-    </form>
-    <div class="section-head">进出记录</div>
-    <div class="panel">${renderMoves()}</div>`;
+    </form>`;
 }
 
 function lineHtml() {
@@ -395,22 +456,29 @@ function lineHtml() {
     .join("");
   const wrap = document.createElement("div");
   wrap.className = "line";
+  const defaultProduct = store.data.products[0];
+  const defaultRetail = Number(defaultProduct?.retailPrice ?? 0) || 0;
   wrap.innerHTML = `
     <select class="field" name="productId">${opts}</select>
     <input class="field" name="qty" placeholder="数量" inputmode="numeric" value="1">
-    <input class="field" name="price" placeholder="单价" inputmode="decimal">
+    <input class="field" name="price" placeholder="单价" inputmode="decimal" value="${defaultRetail}">
     <button type="button" class="btn ghost" data-act="rm-line">×</button>`;
   return wrap;
 }
 
-function renderMoves() {
+function renderMovesPage() {
   const s = q.trim().toLowerCase();
   const rows = store.data.moves.filter((m) => {
     if (!s) return true;
-    return [m.name, m.sku, m.note, m.type].join(" ").toLowerCase().includes(s);
+    const searchText = [fmtTime(m.createdAt), m.name, m.sku, m.note, m.type, String(m.qty), String(m.after)]
+      .join(" ")
+      .toLowerCase();
+    return searchText.includes(s);
   });
+
   if (!rows.length) return `<div class="empty">暂无进出记录</div>`;
   const typeLabel = { in: "入库", out: "出库", adjust: "调整" };
+
   return `
     <div class="table-wrap">
       <table>
@@ -422,6 +490,7 @@ function renderMoves() {
             <th class="right">数量</th>
             <th class="right">结余</th>
             <th>备注</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -435,6 +504,7 @@ function renderMoves() {
               <td data-label="数量" class="num right">${m.qty > 0 ? "+" : ""}${m.qty}</td>
               <td data-label="结余" class="num right">${m.after}</td>
               <td data-label="备注" class="muted">${escapeHtml(m.note || "—")}</td>
+              <td class="row-actions move-action-cell"><button class="btn danger" data-act="del-move" data-id="${m.id}">删除</button></td>
             </tr>`
             )
             .join("")}
@@ -447,47 +517,137 @@ function renderExpress() {
   const s = q.trim().toLowerCase();
   const rows = store.data.orders.filter((o) => {
     if (!s) return true;
-    return [o.customer, o.phone, o.address, o.express.company, o.express.tracking, o.note]
+    return [o.express.info, o.express.company, o.express.tracking, o.note, o.actualIncomeNote]
       .join(" ")
       .toLowerCase()
       .includes(s);
   });
   if (!rows.length) return `<div class="empty">暂无快递信息</div>`;
+
+  const actualRows = rows
+    .filter((o) => Number(o.actualIncome ?? o.income ?? 0) > 0)
+    .map((o) => {
+      const actual = Number(o.actualIncome ?? o.income ?? 0);
+      return `
+        <tr>
+          <td class="num">${fmtTime(o.actualIncomeAt || o.createdAt)}</td>
+          <td>${escapeHtml(o.express.company || "—")}</td>
+          <td class="num">${escapeHtml(o.express.tracking || "—")}</td>
+          <td class="num right">${money(actual)}</td>
+          <td class="muted">${escapeHtml(o.actualIncomeNote || "—")}</td>
+        </tr>`;
+    })
+    .join("");
+
   return `
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>时间</th>
-            <th>客户</th>
-            <th>快递</th>
-            <th>运单号</th>
-            <th class="right">运费</th>
-            <th>货品</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map((o) => {
-              const goods = o.items.map((i) => `${i.name}×${i.qty}`).join("、");
-              return `
-              <tr>
-                <td data-label="时间" class="num">${fmtTime(o.createdAt)}</td>
-                <td data-label="客户">${escapeHtml(o.customer || "—")}<div class="muted">${escapeHtml(o.phone || o.address || "")}</div></td>
-                <td data-label="快递">${escapeHtml(o.express.company || "—")}</td>
-                <td data-label="运单号" class="num">${escapeHtml(o.express.tracking || "—")}</td>
-                <td data-label="运费" class="num right">${money(o.express.freight)}</td>
-                <td data-label="货品">${escapeHtml(goods)}</td>
-                <td class="row-actions">
-                  <button class="btn ghost" data-act="edit-exp" data-id="${o.id}">改单号</button>
-                </td>
-              </tr>`;
-            })
-            .join("")}
-        </tbody>
-      </table>
+    <div class="express-stack">
+      <div class="table-wrap express-table-wrap">
+        <table class="express-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>快递</th>
+              <th>运单号</th>
+              <th class="right">货款</th>
+              <th class="right">原应收款</th>
+              <th class="right">实入</th>
+              <th>实际入账</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows
+              .map((o) => {
+                const goods = o.items.map((i) => `${i.name}×${i.qty}`).join("、");
+                const actual = Number(o.actualIncome ?? o.income ?? 0);
+                return `
+                <tr>
+                  <td data-label="时间" class="num">${fmtTime(o.createdAt)}</td>
+                  <td data-label="快递">${escapeHtml(o.express.company || "—")}</td>
+                  <td data-label="运单号" class="num">${escapeHtml(o.express.tracking || "—")}</td>
+                  <td data-label="货款" class="num right">${money(o.income || 0)}</td>
+                  <td data-label="原应收款" class="num right">${money(o.expectedIncome ?? o.income ?? 0)}</td>
+                  <td data-label="实入" class="num right">${money(actual)}</td>
+                  <td data-label="实际入账" class="muted actual-note">${escapeHtml(o.actualIncomeNote || (actual ? "已登记" : "未登记"))}<div class="muted small-note">${escapeHtml(o.actualIncomeAt ? fmtTime(o.actualIncomeAt) : "")}</div></td>
+                  <td class="row-actions action-cell">
+                    <button class="btn ghost" data-act="actual-income" data-id="${o.id}">实际入账</button>
+                    <button class="btn ghost" data-act="edit-exp" data-id="${o.id}">改单号</button>
+                    <button class="btn danger" data-act="del-order" data-id="${o.id}">删除</button>
+                  </td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+      <div class="section-head">实际入账登记</div>
+      <div class="panel express-subpanel">
+        ${actualRows ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>登记时间</th><th>快递</th><th>运单号</th><th class="right">金额</th><th>备注</th></tr></thead><tbody>${actualRows}</tbody></table></div>` : `<div class="empty">暂无实际入账登记</div>`}
+      </div>
     </div>`;
+}
+
+function renderSplitLedger() {
+  const grouped = store.data.ledger.reduce((acc, x) => {
+    const cat = (x.category || "未分类").trim() || "未分类";
+    if (!acc[cat]) {
+      acc[cat] = { income: 0, expense: 0, net: 0 };
+    }
+    if (x.type === "income") {
+      acc[cat].income += Number(x.amount) || 0;
+      acc[cat].net += Number(x.amount) || 0;
+    } else {
+      acc[cat].expense += Number(x.amount) || 0;
+      acc[cat].net -= Number(x.amount) || 0;
+    }
+    return acc;
+  }, {});
+
+  const rows = Object.entries(grouped)
+    .map(([category, v]) => `
+      <tr>
+        <td>${escapeHtml(category)}</td>
+        <td class="num right">${money(v.income)}</td>
+        <td class="num right">${money(v.expense)}</td>
+        <td class="num right ${v.net >= 0 ? "positive" : "negative"}">${v.net >= 0 ? "+" : "−"}${money(Math.abs(v.net))}</td>
+      </tr>
+    `)
+    .join("");
+
+  return `
+    <div class="section-head">分账</div>
+    <div class="panel split-panel">
+      <div class="split-grid">
+        <div class="split-card income">
+          <span>收入总额</span>
+          <strong>${money(Object.values(grouped).reduce((sum, v) => sum + (v.income || 0), 0))}</strong>
+        </div>
+        <div class="split-card expense">
+          <span>支出总额</span>
+          <strong>${money(Object.values(grouped).reduce((sum, v) => sum + (v.expense || 0), 0))}</strong>
+        </div>
+        <div class="split-card net">
+          <span>净额</span>
+          <strong>${money(Object.values(grouped).reduce((sum, v) => sum + v.net, 0))}</strong>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="split-table">
+          <thead>
+            <tr>
+              <th>类目</th>
+              <th class="right">收入</th>
+              <th class="right">支出</th>
+              <th class="right">净额</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="4"><div class="empty">暂无分账数据</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderLedger() {
@@ -517,21 +677,23 @@ function renderLedger() {
               <td data-label="类目">${escapeHtml(x.category)}</td>
               <td data-label="金额" class="num right">${x.type === "income" ? "+" : "−"}${money(x.amount)}</td>
               <td data-label="备注" class="muted">${escapeHtml(x.note || "—")}</td>
-              <td class="row-actions"><button class="btn ghost" data-act="del-led" data-id="${x.id}">删</button></td>
+              <td class="row-actions"><button class="btn danger" data-act="del-led" data-id="${x.id}">删除</button></td>
             </tr>`
             )
             .join("")}
         </tbody></table></div>`
         : `<div class="empty">暂无账目</div>`
-    }`;
+    }
+    ${renderSplitLedger()}`;
 }
 
 function toolbar() {
   const addStock = view === "stock" ? `<button class="btn primary" id="add-product">添加货品</button>` : "";
   const addLed = view === "ledger" ? `<button class="btn primary" id="add-ledger">记一笔</button>` : "";
-  const hint = view === "flow" ? "搜索进出记录" : "搜索";
+  const hint = view === "moves" ? "搜索时间 / 产品 / 备注" : view === "flow" ? "搜索进出记录" : "搜索";
   return `
-    <div class="toolbar">
+    <div class="toolbar toolbar-top">
+      <button class="btn danger clear-all-btn" id="clear-all">删除所有数据</button>
       <input class="search grow" id="search" placeholder="${hint}" value="${escapeAttr(q)}">
       ${addStock}${addLed}
       <button class="btn" id="export">导出</button>
@@ -540,14 +702,26 @@ function toolbar() {
 }
 
 function render() {
+  const main = $("#main");
   kpis();
   if (view === "flow") {
-    $("#main").innerHTML = toolbar() + `<div class="stack">${renderFlow()}</div>`;
-    return;
+    main.innerHTML = toolbar() + `<div class="stack">${renderFlow()}</div>`;
+  } else if (view === "moves") {
+    main.innerHTML = toolbar() + `<div class="panel">${renderMovesPage()}</div>`;
+  } else {
+    const body =
+      view === "stock" ? renderStock() : view === "express" ? renderExpress() : renderLedger();
+    main.innerHTML = toolbar() + `<div class="panel">${body}</div>`;
   }
-  const body =
-    view === "stock" ? renderStock() : view === "express" ? renderExpress() : renderLedger();
-  $("#main").innerHTML = toolbar() + `<div class="panel">${body}</div>`;
+
+  if (view === "flow") {
+    bindFlowLineCalc();
+  }
+
+  main.classList.remove("view-fade");
+  requestAnimationFrame(() => {
+    main.classList.add("view-fade");
+  });
 }
 
 function escapeHtml(s) {
@@ -587,6 +761,69 @@ function openDialog(title, fieldsHtml, onOk) {
   });
 }
 
+function openConfirm(message, onConfirm) {
+  const dlg = $("#confirm-dlg");
+  dlg.innerHTML = `
+    <div class="confirm-dialog">
+      <div class="confirm-header">
+        <span></span>
+        <button type="button" class="confirm-close" id="confirm-close" aria-label="关闭">×</button>
+      </div>
+      <div class="confirm-body">${escapeHtml(message)}</div>
+      <div class="confirm-actions">
+        <button class="btn" type="button" id="confirm-cancel">取消</button>
+        <button class="btn danger" type="button" id="confirm-ok">删除</button>
+      </div>
+    </div>
+  `;
+  dlg.showModal();
+  $("#confirm-close").addEventListener("click", () => dlg.close());
+  $("#confirm-cancel").addEventListener("click", () => dlg.close());
+  $("#confirm-ok").addEventListener("click", () => {
+    try {
+      onConfirm();
+      dlg.close();
+    } catch (err) {
+      toast(err.message);
+      dlg.close();
+    }
+  });
+}
+
+function openNotice(message, { autoCloseMs = 0, onAutoClose } = {}) {
+  const dlg = $("#confirm-dlg");
+  dlg.innerHTML = `
+    <div class="confirm-dialog notice-dialog">
+      <div class="confirm-header">
+        <span></span>
+        <button type="button" class="confirm-close" id="confirm-close" aria-label="关闭">×</button>
+      </div>
+      <div class="confirm-body notice-body">${escapeHtml(message)}</div>
+      <div class="confirm-actions">
+        <button class="btn primary" type="button" id="notice-ok">确定</button>
+      </div>
+    </div>
+  `;
+  dlg.showModal();
+
+  const close = () => {
+    dlg.close();
+  };
+
+  $("#confirm-close").addEventListener("click", close);
+  $("#notice-ok").addEventListener("click", () => {
+    close();
+    if (onAutoClose) onAutoClose();
+  });
+
+  if (autoCloseMs > 0) {
+    setTimeout(() => {
+      close();
+      if (onAutoClose) onAutoClose();
+    }, autoCloseMs);
+  }
+}
+
 function productFields(p = {}) {
   return `
     <label class="label">名称</label><input class="field" name="name" required value="${escapeAttr(p.name || "")}">
@@ -594,6 +831,7 @@ function productFields(p = {}) {
     <label class="label" style="margin-top:8px">初始库存</label><input class="field" name="qty" inputmode="numeric" value="${p.qty ?? 0}" ${p.id ? "disabled" : ""}>
     <label class="label" style="margin-top:8px">单位</label><input class="field" name="unit" value="${escapeAttr(p.unit || "件")}">
     <label class="label" style="margin-top:8px">成本</label><input class="field" name="cost" inputmode="decimal" value="${p.cost ?? ""}">
+    <label class="label" style="margin-top:8px">零售价</label><input class="field" name="retailPrice" inputmode="decimal" value="${p.retailPrice ?? ""}">
     <label class="label" style="margin-top:8px">备注</label><input class="field" name="note" value="${escapeAttr(p.note || "")}">`;
 }
 
@@ -605,6 +843,53 @@ function applyQty(id, value) {
     toast(e.message);
     render();
   }
+}
+
+function syncExpectedIncomeFromLines(form) {
+  if (!form) return;
+  const total = [...form.querySelectorAll("#lines .line")].reduce((sum, line) => {
+    const qtyEl = $("[name=qty]", line);
+    const priceEl = $("[name=price]", line);
+    const qty = Number(qtyEl ? qtyEl.value : 0) || 0;
+    const price = Number(priceEl ? priceEl.value : 0) || 0;
+    return sum + qty * price;
+  }, 0);
+  const expectedInput = form.elements ? form.elements.expectedIncome : null;
+  if (expectedInput) expectedInput.value = total > 0 ? String(total) : "";
+}
+
+function syncRetailPriceForLine(line) {
+  const productSelect = $(("[name=productId]"), line);
+  const priceInput = $(("[name=price]"), line);
+  if (!productSelect || !priceInput) return;
+  const product = store.data.products.find((p) => p.id === productSelect.value);
+  const retailPrice = Number(product?.retailPrice ?? 0) || 0;
+  priceInput.value = String(retailPrice);
+}
+
+function bindFlowLineCalc() {
+  const form = document.querySelector("#order-form");
+  if (!form) return;
+  form.querySelectorAll('#lines .line').forEach((line) => {
+    const productSelect = $("[name=productId]", line);
+    const qtyInput = $("[name=qty]", line);
+    const priceInput = $("[name=price]", line);
+
+    if (productSelect) {
+      productSelect.onchange = () => {
+        syncRetailPriceForLine(line);
+        syncExpectedIncomeFromLines(form);
+      };
+      syncRetailPriceForLine(line);
+    }
+
+    [qtyInput, priceInput].forEach((input) => {
+      if (!input) return;
+      input.oninput = () => syncExpectedIncomeFromLines(form);
+      input.onchange = () => syncExpectedIncomeFromLines(form);
+    });
+  });
+  syncExpectedIncomeFromLines(form);
 }
 
 function bind() {
@@ -636,6 +921,14 @@ function bind() {
       );
     }
 
+    if (e.target.id === "clear-all") {
+      openConfirm("确认删除全部数据？此操作不可恢复。", () => {
+        store.clearAll();
+        render();
+        toast("已清空全部数据");
+      });
+    }
+
     if (e.target.id === "export") {
       const blob = new Blob([store.export()], { type: "application/json" });
       const a = document.createElement("a");
@@ -664,7 +957,9 @@ function bind() {
     }
 
     if (e.target.id === "add-line") {
-      $("#lines").appendChild(lineHtml());
+      const newLine = lineHtml();
+      $("#lines").appendChild(newLine);
+      bindFlowLineCalc();
     }
 
     const act = e.target.closest("[data-act]");
@@ -695,29 +990,64 @@ function bind() {
           sku: fd.get("sku").trim(),
           unit: fd.get("unit").trim(),
           cost: Number(fd.get("cost")) || 0,
+          retailPrice: Number(fd.get("retailPrice")) || 0,
           note: fd.get("note").trim(),
         });
       });
     }
     if (action === "del") {
-      if (confirm("删除该货品？进出记录会保留。")) {
+      openConfirm("删除该货品？进出记录会保留。", () => {
         store.removeProduct(id);
         render();
-      }
+      });
     }
     if (action === "rm-line") {
       const lines = $$("#lines .line");
-      if (lines.length > 1) act.closest(".line").remove();
+      if (lines.length > 1) {
+        act.closest(".line").remove();
+        bindFlowLineCalc();
+      }
     }
     if (action === "del-led") {
-      store.removeLedger(id);
-      render();
+      openConfirm("确认删除这笔账目？", () => {
+        store.removeLedger(id);
+        render();
+      });
+    }
+    if (action === "del-move") {
+      openConfirm("删除该条进出记录？", () => {
+        store.removeMove(id);
+        toast("已删除记录");
+        render();
+      });
+    }
+    if (action === "del-order") {
+      openConfirm("删除该快递单？会同步删除关联账目并回退库存。", () => {
+        store.removeOrder(id);
+        toast("已删除快递单");
+        render();
+      });
+    }
+    if (action === "actual-income") {
+      const o = store.data.orders.find((x) => x.id === id);
+      openDialog(
+        "登记实际入账",
+        `<label class="label">实际入账金额</label><input class="field" name="amount" inputmode="decimal" value="${o.actualIncome ?? o.income ?? 0}">
+         <label class="label" style="margin-top:8px">备注</label><input class="field" name="note" value="${escapeAttr(o.actualIncomeNote || "")}">`,
+        (fd) => {
+          store.updateOrderActualIncome(id, fd.get("amount"), fd.get("note"));
+          toast("已登记实际入账");
+        }
+      );
     }
     if (action === "edit-exp") {
       const o = store.data.orders.find((x) => x.id === id);
+      const companyOptions = ["顺丰", "中通", "极兔", "申通", "京东"]
+        .map((company) => `<option value="${company}" ${o.express.company === company ? "selected" : ""}>${company}</option>`)
+        .join("");
       openDialog(
         "改快递",
-        `<label class="label">快递公司</label><input class="field" name="company" value="${escapeAttr(o.express.company)}">
+        `<label class="label">快递公司</label><select class="field" name="company">${companyOptions}</select>
          <label class="label" style="margin-top:8px">运单号</label><input class="field" name="tracking" value="${escapeAttr(o.express.tracking)}">
          <label class="label" style="margin-top:8px">运费</label><input class="field" name="freight" value="${o.express.freight}">`,
         (fd) => {
@@ -737,14 +1067,16 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
-    if (e.target.id !== "search") return;
-    q = e.target.value;
-    const pos = e.target.selectionStart;
-    render();
-    const s = $("#search");
-    if (s) {
-      s.focus();
-      s.setSelectionRange(pos, pos);
+    const target = e.target;
+    if (target && target.id === "search") {
+      q = target.value;
+      const pos = target.selectionStart;
+      render();
+      const s = $("#search");
+      if (s) {
+        s.focus();
+        s.setSelectionRange(pos, pos);
+      }
     }
   });
 
@@ -759,17 +1091,19 @@ function bind() {
     }));
     try {
       store.createOrder({
-        customer: form.customer.value,
-        phone: form.phone.value,
-        address: form.address.value,
+        info: form.info.value,
         company: form.company.value,
         tracking: form.tracking.value,
         freight: form.freight.value,
+        expectedIncome: form.expectedIncome.value,
         income: form.income.value,
         note: form.note.value,
         items: lines,
       });
-      toast("已出单并扣库存");
+      openNotice("已出单并扣库存，正在跳转到快递界面...", {
+        autoCloseMs: 3000,
+        onAutoClose: () => setView("express"),
+      });
       render();
     } catch (err) {
       toast(err.message);

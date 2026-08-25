@@ -24,6 +24,7 @@
       <nav class="nav">
         <button data-view="stock" class="active">库存</button>
         <button data-view="flow">进出</button>
+        <button data-view="moves">记录</button>
         <button data-view="express">快递</button>
         <button data-view="ledger">账本</button>
       </nav>
@@ -34,12 +35,14 @@
     <nav class="mobile-nav">
       <button data-view="stock" class="active">库存</button>
       <button data-view="flow">进出</button>
+      <button data-view="moves">记录</button>
       <button data-view="express">快递</button>
       <button data-view="ledger">账本</button>
     </nav>
 
     <div class="toast" id="toast"></div>
     <dialog id="dlg"></dialog>
+    <dialog id="confirm-dlg"></dialog>
     <script src="js/app.js"></script>
   </body>
 </html>
