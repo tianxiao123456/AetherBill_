@@ -735,16 +735,6 @@ function escapeAttr(s) {
   return escapeHtml(s);
 }
 
-function closeDialogSmooth(dlg) {
-  if (!dlg || !dlg.open) return;
-  dlg.classList.add("closing");
-  const finish = () => {
-    dlg.close();
-    dlg.classList.remove("closing");
-  };
-  dlg.addEventListener("animationend", finish, { once: true });
-}
-
 function openDialog(title, fieldsHtml, onOk) {
   const dlg = $("#dlg");
   dlg.innerHTML = `
@@ -758,12 +748,12 @@ function openDialog(title, fieldsHtml, onOk) {
     </div>`;
   dlg.showModal();
   const form = $("#dlg-form");
-  $("#dlg-cancel").addEventListener("click", () => closeDialogSmooth(dlg));
+  $("#dlg-cancel").addEventListener("click", () => dlg.close());
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     try {
       onOk(new FormData(form));
-      closeDialogSmooth(dlg);
+      dlg.close();
       render();
     } catch (err) {
       toast(err.message);
@@ -787,15 +777,15 @@ function openConfirm(message, onConfirm) {
     </div>
   `;
   dlg.showModal();
-  $("#confirm-close").addEventListener("click", () => closeDialogSmooth(dlg));
-  $("#confirm-cancel").addEventListener("click", () => closeDialogSmooth(dlg));
+  $("#confirm-close").addEventListener("click", () => dlg.close());
+  $("#confirm-cancel").addEventListener("click", () => dlg.close());
   $("#confirm-ok").addEventListener("click", () => {
     try {
       onConfirm();
-      closeDialogSmooth(dlg);
+      dlg.close();
     } catch (err) {
       toast(err.message);
-      closeDialogSmooth(dlg);
+      dlg.close();
     }
   });
 }
@@ -817,7 +807,7 @@ function openNotice(message, { autoCloseMs = 0, onAutoClose } = {}) {
   dlg.showModal();
 
   const close = () => {
-    closeDialogSmooth(dlg);
+    dlg.close();
   };
 
   $("#confirm-close").addEventListener("click", close);
